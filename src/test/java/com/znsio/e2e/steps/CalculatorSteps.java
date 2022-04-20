@@ -40,4 +40,16 @@ public class CalculatorSteps {
         allDrivers.createDriverFor(SAMPLE_TEST_CONTEXT.ME, Runner.platform, context);
         new CalculatorBL(SAMPLE_TEST_CONTEXT.ME, Runner.platform).startCalculator();
     }
+
+    @And("{string} select {string}")
+    public void select(String userPersona, String action) {
+        Platform onPlatform = allDrivers.getPlatformForUser(userPersona);
+        new CalculatorBL(userPersona, onPlatform).startCalculator().selectNumber(action);
+    }
+
+    @And("{string} press {string}")
+    public void press(String userPersona, String action) {
+        Platform onPlatform = allDrivers.getPlatformForUser(userPersona);
+        new CalculatorBL(userPersona, onPlatform).pressOperation(action);
+    }
 }

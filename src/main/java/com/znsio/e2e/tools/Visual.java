@@ -1,27 +1,40 @@
 package com.znsio.e2e.tools;
 
 import com.applitools.eyes.*;
-import com.applitools.eyes.selenium.*;
-import com.applitools.eyes.selenium.fluent.*;
+import com.applitools.eyes.selenium.BrowserType;
+import com.applitools.eyes.selenium.ClassicRunner;
+import com.applitools.eyes.selenium.Configuration;
+import com.applitools.eyes.selenium.StitchMode;
+import com.applitools.eyes.selenium.fluent.SeleniumCheckSettings;
+import com.applitools.eyes.selenium.fluent.Target;
+import com.applitools.eyes.visualgrid.model.DeviceName;
+import com.applitools.eyes.visualgrid.model.RenderBrowserInfo;
 import com.applitools.eyes.visualgrid.model.ScreenOrientation;
-import com.applitools.eyes.visualgrid.model.*;
-import com.applitools.eyes.visualgrid.services.*;
-import com.context.*;
-import com.epam.reportportal.service.*;
+import com.applitools.eyes.visualgrid.services.VisualGridRunner;
+import com.context.SessionContext;
+import com.context.TestExecutionContext;
+import com.epam.reportportal.service.ReportPortal;
+import com.znsio.e2e.entities.APPLITOOLS;
 import com.znsio.e2e.entities.Platform;
-import com.znsio.e2e.entities.*;
+import com.znsio.e2e.entities.TEST_CONTEXT;
 import com.znsio.e2e.exceptions.InvalidTestDataException;
-import com.znsio.e2e.runner.*;
+import com.znsio.e2e.runner.Runner;
 import org.apache.log4j.Logger;
-import org.assertj.core.api.*;
-import org.jetbrains.annotations.*;
-import org.openqa.selenium.*;
+import org.assertj.core.api.SoftAssertions;
+import org.jetbrains.annotations.NotNull;
+import org.openqa.selenium.Dimension;
+import org.openqa.selenium.JavascriptExecutor;
+import org.openqa.selenium.WebDriver;
 
-import java.io.*;
-import java.time.*;
-import java.util.*;
+import java.io.File;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.Date;
+import java.util.List;
+import java.util.Map;
 
 import static com.znsio.e2e.runner.Runner.NOT_SET;
+import static com.znsio.e2e.runner.Runner.USER_NAME;
 import static com.znsio.e2e.runner.Setup.*;
 
 public class Visual {
@@ -121,10 +134,37 @@ public class Visual {
         eyes.addProperty(PLATFORM, String.valueOf(getValueFromConfig(PLATFORM)));
         eyes.addProperty(RUN_IN_CI, String.valueOf(getValueFromConfig(RUN_IN_CI)));
         eyes.addProperty(TARGET_ENVIRONMENT, String.valueOf(getValueFromConfig(TARGET_ENVIRONMENT)));
+        eyes.addProperty("USER_NAME", USER_NAME);
 
-        eyes.open(innerDriver, appName, testName, (RectangleSize) getValueFromConfig(APPLITOOLS.RECTANGLE_SIZE));
+        RectangleSize setBrowserViewPortSize = getBrowserViewPortSize(driverType, innerDriver);
+        LOGGER.info("Using browser dimensions for Applitools: " + setBrowserViewPortSize);
+
+        eyes.open(innerDriver, appName, testName, setBrowserViewPortSize);
         LOGGER.info("instantiateWebEyes: eyes.getIsDisabled(): " + eyes.getIsDisabled());
         return eyes;
+    }
+
+    private RectangleSize getBrowserViewPortSize(String driverType, WebDriver innerDriver) {
+        RectangleSize providedBrowserViewPortSizeFromConfig = (RectangleSize) getValueFromConfig(APPLITOOLS.RECTANGLE_SIZE);
+        int providedBrowserViewPortSizeFromConfigHeight = providedBrowserViewPortSizeFromConfig.getHeight();
+        int providedBrowserViewPortSizeFromConfigWidth = providedBrowserViewPortSizeFromConfig.getWidth();
+        LOGGER.info("Provided browser dimensions: " + providedBrowserViewPortSizeFromConfig);
+
+        if (driverType.equals(Driver.APPIUM_DRIVER)) {
+            return providedBrowserViewPortSizeFromConfig;
+        } else {
+            JavascriptExecutor js = (JavascriptExecutor) innerDriver;
+            Dimension actualBrowserSize = innerDriver.manage().window().getSize();
+            LOGGER.info("Actual browser dimensions: " + actualBrowserSize);
+            Long actualHeight = (Long) js.executeScript("return (window.innerHeight);");
+            Long actualWidth = (Long) js.executeScript("return (window.innerWidth);");
+
+            if (providedBrowserViewPortSizeFromConfigHeight > actualHeight.intValue() || providedBrowserViewPortSizeFromConfigWidth > actualWidth.intValue()) {
+                return new RectangleSize(actualWidth.intValue(), actualHeight.intValue());
+            } else {
+                return providedBrowserViewPortSizeFromConfig;
+            }
+        }
     }
 
     private void addBrowserAndDeviceConfigForUFG(boolean isUFG, Configuration configuration) {
@@ -279,12 +319,12 @@ public class Visual {
         return this;
     }
 
-    public Visual takeScreenshot (String fromScreen, String tag) {
+    public Visual takeScreenshot(String fromScreen, String tag) {
         screenShotManager.takeScreenShot(innerDriver, getFormattedTagName(fromScreen, tag));
         return this;
     }
 
-    public void handleTestResults (String userPersona, String driverType) {
+    public void handleTestResults(String userPersona, String driverType) {
         switch (driverType) {
             case Driver.WEB_DRIVER:
                 takeScreenshot(userPersona, "afterHooks");
