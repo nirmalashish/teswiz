@@ -643,11 +643,7 @@ public class Drivers {
         String logMessage = String.format("Browser logs for user: %s" +
                 "%nlogFileName: %s", userPersona, logFileName);
         LOGGER.info(logMessage);
-//        if (isRunningInCI()) {
-//            ReportPortal.emitLog(logMessage, DEBUG, new Date());
-//        } else {
         ReportPortal.emitLog(logMessage, DEBUG, new Date(), new File(logFileName));
-//        }
 
         WebDriver webDriver = driver.getInnerDriver();
         if (null == webDriver) {
@@ -670,13 +666,21 @@ public class Drivers {
             logMessage = String.format("Strange. But WindowsDriver for user '%s' already closed", userPersona);
             LOGGER.info(logMessage);
             ReportPortal.emitLog(logMessage, DEBUG, new Date());
-        } else {
+            return;
+        }
+
+        try {
             logMessage = String.format("Closing WindowsDriver for App '%s' for user '%s'", appPackageName, userPersona);
             LOGGER.info(logMessage);
             appiumDriver.closeApp();
             appiumDriver.quit();
 
             logMessage = String.format("App: '%s' terminated", appPackageName);
+            LOGGER.info(logMessage);
+            ReportPortal.emitLog(logMessage, DEBUG, new Date());
+        } catch (Exception e) {
+            logMessage = String.format("Exception caught while closing WindowsDriver for App '%s' for user '%s':%n%s :: %s",
+                    appPackageName, userPersona, e.getClass().toString(), e.getMessage());
             LOGGER.info(logMessage);
             ReportPortal.emitLog(logMessage, DEBUG, new Date());
         }
