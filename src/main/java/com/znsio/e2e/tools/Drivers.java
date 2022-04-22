@@ -25,6 +25,8 @@ import org.openqa.selenium.remote.*;
 
 import java.io.*;
 import java.net.*;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.logging.*;
 
@@ -40,6 +42,7 @@ public class Drivers {
     private final Map<String, Capabilities> userPersonaDriverCapabilities = new HashMap<>();
     private final Map<String, Platform> userPersonaPlatforms = new HashMap<>();
     private final Map<String, String> userPersonaBrowserLogs = new HashMap<>();
+    private final Map<String, String> userPersonaDeviceLogFile = new HashMap<>();
     private final Map<String, String> userPersonaApps = new HashMap<>();
     private final int MAX_NUMBER_OF_APPIUM_DRIVERS;
     private final int MAX_NUMBER_OF_WEB_DRIVERS;
@@ -49,6 +52,7 @@ public class Drivers {
     private boolean isRunInHeadlessMode = false;
     private String baseUrl = null;
     private String capabilityDirectory = null;
+    private Path deviceLogsFolder = null;
 
     public Drivers() {
         MAX_NUMBER_OF_APPIUM_DRIVERS = Runner.getMaxNumberOfAppiumDrivers();
@@ -80,6 +84,7 @@ public class Drivers {
         context.addTestState(TEST_CONTEXT.CURRENT_PLATFORM, forPlatform);
         userPersonaApps.put(userPersona, appName);
         userPersonaPlatforms.put(userPersona, forPlatform);
+        deviceLogsFolder = Paths.get(context.getTestStateAsString("deviceLog")).getParent();
 
         Driver currentDriver;
         if (userPersonaDrivers.containsKey(userPersona)) {
@@ -146,6 +151,7 @@ public class Drivers {
             context.addTestState(TEST_CONTEXT.DEVICE_ON, deviceInfo.getDeviceOn());
             LOGGER.info("CAPABILITIES: " + appiumDriverCapabilities);
             userPersonaDriverCapabilities.put(userPersona, appiumDriverCapabilities);
+            userPersonaDeviceLogFile.put(userPersona, appiumDriverCapabilities.getCapability("udid").toString());
             currentDriver = new Driver(
                     context.getTestName() + "-" + userPersona,
                     deviceInfo.getDeviceOn(),
@@ -160,6 +166,7 @@ public class Drivers {
                         key -> LOGGER.info("\t" + key + ":: " + appiumDriverCapabilities.getCapability(key)));
 
                 userPersonaDriverCapabilities.put(userPersona, appiumDriverCapabilities);
+                userPersonaDeviceLogFile.put(userPersona, appiumDriverCapabilities.getCapability("udid").toString());
             } catch (Exception e) {
                 throw new EnvironmentSetupException(
                         String.format("Unable to create Android driver '#%d' for user persona: '%s'",
@@ -687,6 +694,7 @@ public class Drivers {
     }
 
     private void closeAndroidAppOnDevice(String userPersona, @NotNull Driver driver) {
+        this.attachLogFileForPersona(userPersona);
         String appPackageName = Runner.getAppPackageName();
         String logMessage;
         AppiumDriver appiumDriver = (AppiumDriver) driver.getInnerDriver();
@@ -710,6 +718,38 @@ public class Drivers {
             logMessage = String.format("App: '%s' Application state after closing app: '%s'%n",
                     appPackageName,
                     applicationState);
+            LOGGER.info(logMessage);
+            ReportPortal.emitLog(logMessage, DEBUG, new Date());
+        }
+    }
+
+    private void attachLogFileForPersona(String userPersona) {
+        String logMessage;
+        String logFileName = userPersonaDeviceLogFile.get(userPersona);
+        File fileToBeUploaded = null;
+
+        if (null == deviceLogsFolder) {
+            logMessage = String.format("Device Logs folder path is null!");
+            LOGGER.info(logMessage);
+            ReportPortal.emitLog(logMessage, DEBUG, new Date());
+            return;
+        }
+
+        File folder = new File(String.valueOf(deviceLogsFolder));
+        for (File file : folder.listFiles()) {
+            if (file.getName().contains(logFileName)) {
+                fileToBeUploaded = file;
+                break;
+            }
+        }
+
+        if (null != fileToBeUploaded) {
+            logMessage = String.format("Device logs for user: %s" +
+                    "%nlogFileName: %s", userPersona, fileToBeUploaded.getName());
+            LOGGER.info(logMessage);
+            ReportPortal.emitLog(logMessage, DEBUG, new Date(), fileToBeUploaded);
+        } else {
+            logMessage = String.format("No log file found with the name '%s' at '%s' folder", logFileName, deviceLogsFolder.toString());
             LOGGER.info(logMessage);
             ReportPortal.emitLog(logMessage, DEBUG, new Date());
         }
