@@ -84,7 +84,6 @@ public class Drivers {
         context.addTestState(TEST_CONTEXT.CURRENT_PLATFORM, forPlatform);
         userPersonaApps.put(userPersona, appName);
         userPersonaPlatforms.put(userPersona, forPlatform);
-        deviceLogsFolder = Paths.get(context.getTestStateAsString("deviceLog")).getParent();
 
         Driver currentDriver;
         if (userPersonaDrivers.containsKey(userPersona)) {
@@ -96,6 +95,8 @@ public class Drivers {
 
         switch (forPlatform) {
             case android:
+                deviceLogsFolder = (null == context.getTestState("deviceLog")) ? null :
+                        Paths.get(context.getTestStateAsString("deviceLog")).getParent();
                 currentDriver = createAndroidDriverForUser(userPersona, forPlatform, context);
                 break;
             case web:
