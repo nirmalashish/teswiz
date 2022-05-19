@@ -51,7 +51,7 @@ public class Setup {
     public static final String PLATFORM = "PLATFORM";
     static final String WEBDRIVER_MANAGER_PROXY_URL = "WEBDRIVER_MANAGER_PROXY_URL";
     static final String BASE_URL_FOR_WEB = "BASE_URL_FOR_WEB";
-    static final String APP_NAME = "APP_NAME";
+    public static final String APP_NAME = "APP_NAME";
     static final String IS_VISUAL = "IS_VISUAL";
     static final String BROWSER = "BROWSER";
     static final String CONFIG_FILE = "CONFIG_FILE";
@@ -266,9 +266,11 @@ public class Setup {
             if (properties.containsKey(BROWSER_CONFIG_FILE)) {
                 Path browserConfigFilePath = Paths.get(properties.get(BROWSER_CONFIG_FILE).toString());
                 configs.put(BROWSER_CONFIG_FILE, browserConfigFilePath.toString());
+                LOGGER.info(String.format("Using the provided BROWSER_CONFIG_FILE: '%s'", browserConfigFilePath));
                 inputStream = Files.newInputStream(browserConfigFilePath);
             } else {
                 configs.put(BROWSER_CONFIG_FILE, DEFAULT_BROWSER_CONFIG_FILE);
+                LOGGER.info(String.format("Using the default BROWSER_CONFIG_FILE: '%s'", DEFAULT_BROWSER_CONFIG_FILE));
                 inputStream = getClass().getResourceAsStream(DEFAULT_BROWSER_CONFIG_FILE);
             }
             configs.put(BROWSER_CONFIG_FILE_CONTENTS, new JSONObject(new JSONTokener(inputStream)).toString());
@@ -555,11 +557,15 @@ public class Setup {
 
     private void setupLocalExecution() {
         setupLocalDevices();
-        int parallelCount = devices.size();
-        if (parallelCount == 0) {
+        int numberOfDevicesForParallelExecution = devices.size();
+        if (numberOfDevicesForParallelExecution == 0) {
             throw new EnvironmentSetupException("No devices available to run the tests");
         }
-        configsInteger.put(PARALLEL, parallelCount);
+        Integer providedParallelCount = configsInteger.get(PARALLEL);
+        if (numberOfDevicesForParallelExecution < providedParallelCount) {
+            throw new EnvironmentSetupException(String.format("Fewer devices (%d) available to run the tests in parallel (Expected more than: %d)", numberOfDevicesForParallelExecution, providedParallelCount));
+        }
+        configsInteger.put(PARALLEL, providedParallelCount);
         configs.put(EXECUTED_ON, "Local Devices");
     }
 
