@@ -1,12 +1,19 @@
 package com.znsio.e2e.steps;
 
-import com.context.*;
-import com.znsio.e2e.businessLayer.*;
-import com.znsio.e2e.entities.*;
-import com.znsio.e2e.runner.*;
-import com.znsio.e2e.tools.*;
-import io.cucumber.java.en.*;
-import org.apache.log4j.*;
+import com.context.SessionContext;
+import com.context.TestExecutionContext;
+import com.znsio.e2e.businessLayer.CalculatorBL;
+import com.znsio.e2e.entities.Platform;
+import com.znsio.e2e.entities.SAMPLE_TEST_CONTEXT;
+import com.znsio.e2e.runner.Runner;
+import com.znsio.e2e.tools.Drivers;
+import io.cucumber.java.en.And;
+import io.cucumber.java.en.Given;
+import io.cucumber.java.en.Then;
+import io.cucumber.java.en.When;
+import org.apache.log4j.Logger;
+
+import static com.znsio.e2e.tools.Wait.waitFor;
 
 public class CalculatorSteps {
     private static final Logger LOGGER = Logger.getLogger(CalculatorSteps.class.getName());
@@ -51,5 +58,8 @@ public class CalculatorSteps {
     public void press(String userPersona, String action) {
         Platform onPlatform = allDrivers.getPlatformForUser(userPersona);
         new CalculatorBL(userPersona, onPlatform).pressOperation(action);
+        if (action.equalsIgnoreCase("equals")) {
+            waitFor(10);
+        }
     }
 }

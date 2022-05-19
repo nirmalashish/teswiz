@@ -22,6 +22,8 @@ import org.openqa.selenium.chrome.*;
 import org.openqa.selenium.firefox.*;
 import org.openqa.selenium.logging.*;
 import org.openqa.selenium.remote.*;
+import org.openqa.selenium.safari.SafariDriver;
+import org.openqa.selenium.safari.SafariOptions;
 
 import java.io.*;
 import java.net.*;
@@ -44,6 +46,7 @@ public class Drivers {
     private final Map<String, String> userPersonaBrowserLogs = new HashMap<>();
     private final Map<String, String> userPersonaDeviceLogFile = new HashMap<>();
     private final Map<String, String> userPersonaApps = new HashMap<>();
+    private final List<AppiumDevice> additionalDevices = new ArrayList<>();
     private final int MAX_NUMBER_OF_APPIUM_DRIVERS;
     private final int MAX_NUMBER_OF_WEB_DRIVERS;
     private int numberOfWebDriversUsed = 0;
@@ -75,10 +78,14 @@ public class Drivers {
     }
 
     public Driver createDriverFor(String userPersona, Platform forPlatform, TestExecutionContext context) {
-        return createDriverFor(userPersona, "default", forPlatform, context);
+        return createDriverFor(userPersona, DEFAULT, Runner.getBrowser(), forPlatform, context);
     }
 
     public Driver createDriverFor(String userPersona, String appName, Platform forPlatform, TestExecutionContext context) {
+        return createDriverFor(userPersona, appName, Runner.getBrowser(), forPlatform, context);
+    }
+
+    public Driver createDriverFor(String userPersona, String appName, String browserName, Platform forPlatform, TestExecutionContext context) {
         LOGGER.info(String.format("createDriverFor: start: userPersona: '%s', Platform: '%s'", userPersona, forPlatform.name()));
         context.addTestState(TEST_CONTEXT.CURRENT_USER_PERSONA, userPersona);
         context.addTestState(TEST_CONTEXT.CURRENT_PLATFORM, forPlatform);
@@ -100,7 +107,7 @@ public class Drivers {
                 currentDriver = createAndroidDriverForUser(userPersona, forPlatform, context);
                 break;
             case web:
-                currentDriver = createWebDriverForUser(userPersona, forPlatform, context);
+                currentDriver = createWebDriverForUser(userPersona, browserName, forPlatform, context);
                 break;
             case windows:
                 currentDriver = createWindowsDriverForUser(userPersona, forPlatform, context);
@@ -136,18 +143,22 @@ public class Drivers {
             );
         }
 
-        String capabilityFile = System.getProperty(CAPS);
-        capabilityDirectory = new File(capabilityFile).getParent();
+        String capabilityFileNameToUseForDriverCreation = System.getProperty(CAPS);
 
         String appName = userPersonaApps.get(userPersona);
-        String resource = capabilityDirectory + File.separator + (appName + "_capabilities.json");
-        File capFile = new File(resource);
-        System.out.println("capFile: " + capFile.getAbsolutePath());
-        System.out.println("capFile.exists(): " + capFile.exists());
+        if (!appName.equalsIgnoreCase(DEFAULT)) {
+            String capabilityFileDirectory = new File(capabilityFileNameToUseForDriverCreation).getParent();
+            capabilityFileNameToUseForDriverCreation = capabilityFileDirectory + File.separator + (appName + "_capabilities.json");
+        }
+        File capabilityFileToUseForDriverCreation = new File(capabilityFileNameToUseForDriverCreation);
+        System.out.println("capabilityFileToUseForDriverCreation: " + capabilityFileToUseForDriverCreation.getAbsolutePath());
+        System.out.println("capabilityFileToUseForDriverCreation.exists(): " + capabilityFileToUseForDriverCreation.exists());
 
         if (numberOfAppiumDriversUsed == 0) {
             AppiumDriver<WebElement> appiumDriver = (AppiumDriver<WebElement>) context.getTestState(TEST_CONTEXT.APPIUM_DRIVER);
             AppiumDevice deviceInfo = (AppiumDevice) context.getTestState(TEST_CONTEXT.DEVICE_INFO);
+            // Do not add the device info to additionalDevices for the driver created by ATD
+            // additionalDevices.add(deviceInfo);
             Capabilities appiumDriverCapabilities = appiumDriver.getCapabilities();
             context.addTestState(TEST_CONTEXT.DEVICE_ON, deviceInfo.getDeviceOn());
             LOGGER.info("CAPABILITIES: " + appiumDriverCapabilities);
@@ -156,11 +167,17 @@ public class Drivers {
             currentDriver = new Driver(
                     context.getTestName() + "-" + userPersona,
                     deviceInfo.getDeviceOn(),
+                    userPersona,
+                    appName,
                     appiumDriver);
         } else {
             try {
-                AppiumDriver appiumDriver = allocateNewDeviceAndStartAppiumDriver(context.getTestName(), capFile.getAbsolutePath());
-                currentDriver = new Driver(context.getTestName() + "-" + userPersona, context.getTestStateAsString(TEST_CONTEXT.DEVICE_ON), appiumDriver);
+                AppiumDriver appiumDriver = allocateNewDeviceAndStartAppiumDriver(context, capabilityFileToUseForDriverCreation.getAbsolutePath());
+                currentDriver = new Driver(context.getTestName() + "-" + userPersona,
+                        context.getTestStateAsString(TEST_CONTEXT.DEVICE_ON),
+                        userPersona,
+                        appName,
+                        appiumDriver);
                 Capabilities appiumDriverCapabilities = appiumDriver.getCapabilities();
                 LOGGER.info("CAPABILITIES: " + appiumDriverCapabilities);
                 appiumDriverCapabilities.getCapabilityNames().forEach(
@@ -186,17 +203,21 @@ public class Drivers {
     }
 
     @NotNull
-    private Driver createWebDriverForUser(String userPersona, Platform forPlatform, TestExecutionContext context) {
+    private Driver createWebDriverForUser(String userPersona, String browserName, Platform forPlatform, TestExecutionContext context) {
         JSONObject browserConfig = null;
-        LOGGER.info(String.format("createWebDriverForUser: begin: userPersona: '%s', Platform: '%s', Number of webdrivers: '%d'%n",
+        LOGGER.info(String.format("createWebDriverForUser: begin: userPersona: '%s', browserName: '%s', Platform: '%s', Number of webdrivers: '%d'%n",
                 userPersona,
+                browserName,
                 forPlatform.name(),
                 numberOfWebDriversUsed));
+
+        String baseUrl = getBaseUrl(userPersona);
+        String appName = userPersonaApps.get(userPersona);
 
         if (numberOfWebDriversUsed == 0) {
             browserConfig = getBrowserConfig();
             context.addTestState(TEST_CONTEXT.BROWSER_CONFIG, browserConfig);
-            checkConnectivityToBaseUrl();
+            checkConnectivityToBaseUrl(baseUrl);
         } else {
             browserConfig = (JSONObject) context.getTestState(TEST_CONTEXT.BROWSER_CONFIG);
         }
@@ -215,9 +236,11 @@ public class Drivers {
         context.addTestState(TEST_CONTEXT.WEB_BROWSER_ON, runningOn);
         if (numberOfWebDriversUsed < MAX_NUMBER_OF_WEB_DRIVERS) {
             LOGGER.info("Create new webdriver instance");
-            WebDriver newWebDriver = createNewWebDriver(userPersona, context, browserConfig);
+            WebDriver newWebDriver = createNewWebDriver(userPersona, browserName, context, browserConfig);
             LOGGER.info("Webdriver instance created");
-            currentDriver = new Driver(updatedTestName, runningOn, newWebDriver, isRunInHeadlessMode, shouldBrowserBeMaximized);
+            newWebDriver.get(baseUrl);
+            LOGGER.info("Navigated to baseUrl: " + baseUrl);
+            currentDriver = new Driver(updatedTestName, runningOn, userPersona, appName, newWebDriver, isRunInHeadlessMode, shouldBrowserBeMaximized);
             LOGGER.info("New Driver with Visual instance created");
         } else {
             throw new InvalidTestDataException(
@@ -231,7 +254,12 @@ public class Drivers {
             );
         }
         numberOfWebDriversUsed++;
-        LOGGER.info(String.format("createWebDriverForUser: done: userPersona: '%s', Platform: '%s', Number of webdrivers: '%d'", userPersona, forPlatform.name(), numberOfWebDriversUsed));
+
+        LOGGER.info(String.format("createWebDriverForUser: done: userPersona: '%s', Platform: '%s', appName: '%s', Number of webdrivers: '%d'",
+                userPersona,
+                forPlatform.name(),
+                appName,
+                numberOfWebDriversUsed));
         return currentDriver;
     }
 
@@ -253,10 +281,14 @@ public class Drivers {
         }
         if (numberOfAppiumDriversUsed < MAX_NUMBER_OF_APPIUM_DRIVERS) {
             AppiumDriver<WebElement> windowsDriver = (AppiumDriver<WebElement>) context.getTestState(TEST_CONTEXT.APPIUM_DRIVER);
+            String appName = userPersonaApps.get(userPersona);
+
             String runningOn = Runner.isRunningInCI() ? "CI" : "local";
             context.addTestState(TEST_CONTEXT.WINDOWS_DEVICE_ON, runningOn);
             currentDriver = new Driver(
                     context.getTestName() + "-" + userPersona,
+                    userPersona,
+                    appName,
                     runningOn,
                     windowsDriver);
             Capabilities windowsDriverCapabilities = windowsDriver.getCapabilities();
@@ -278,13 +310,25 @@ public class Drivers {
         return currentDriver;
     }
 
-    private AppiumDriver allocateNewDeviceAndStartAppiumDriver(String testName, String capabilityFile) {
+    private AppiumDriver allocateNewDeviceAndStartAppiumDriver(TestExecutionContext context, String capabilityFile) {
         try {
+            String testName = context.getTestName();
+            String normalisedScenarioName = context.getTestStateAsString(TEST_CONTEXT.NORMALISED_SCENARIO_NAME);
+            Integer scenarioRunCount = (Integer) context.getTestState(TEST_CONTEXT.SCENARIO_RUN_COUNT);
             DeviceAllocationManager deviceAllocationManager = DeviceAllocationManager.getInstance();
-            AppiumDevice availableDevice = deviceAllocationManager.getNextAvailableDevice();
+                AppiumDevice availableDevice = deviceAllocationManager.getNextAvailableDevice();
             deviceAllocationManager.allocateDevice(availableDevice);
             AppiumDriver driver = new AppiumDriverManager().startAppiumDriverInstance(testName, capabilityFile);
+            additionalDevices.add(availableDevice);
             updateAvailableDeviceInformation(availableDevice);
+            try {
+                String deviceLogFileName =
+                        availableDevice.startDataCapture(normalisedScenarioName, scenarioRunCount);
+                LOGGER.info("Started device log capture in file: " + deviceLogFileName);
+            } catch (IOException | InterruptedException e) {
+                LOGGER.info("Error in starting data capture: " + e.getMessage());
+                e.printStackTrace();
+            }
             ReportPortal.emitLog("allocateNewDeviceAndStartAppiumDriver: Device Info\n" + availableDevice, DEBUG, new Date());
             return driver;
         } catch (Exception e) {
@@ -313,9 +357,8 @@ public class Drivers {
     }
 
     @NotNull
-    private WebDriver createNewWebDriver(String forUserPersona,
+    private WebDriver createNewWebDriver(String forUserPersona, String browserType,
                                          TestExecutionContext testExecutionContext, JSONObject browserConfig) {
-        String browserType = Runner.getBrowser();
 
         DriverManagerType driverManagerType = setupBrowserDriver(testExecutionContext, browserType);
 
@@ -327,16 +370,16 @@ public class Drivers {
             case FIREFOX:
                 driver = createFirefoxDriver(forUserPersona, testExecutionContext, browserConfig.getJSONObject(driverManagerType.getBrowserNameLowerCase()));
                 break;
-            case OPERA:
+            case SAFARI:
+                driver = createSafariDriver(forUserPersona, testExecutionContext, browserConfig.getJSONObject(driverManagerType.getBrowserNameLowerCase()));
+                break;
             case EDGE:
             case IEXPLORER:
             case CHROMIUM:
-            case SAFARI:
+            case OPERA:
                 throw new InvalidTestDataException(String.format("Browser: '%s' is NOT supported", browserType));
         }
         LOGGER.info("Driver created");
-        driver.get(baseUrl);
-        LOGGER.info("Navigated to baseUrl: " + baseUrl);
 
         if (shouldBrowserBeMaximized && !isRunInHeadlessMode) {
             driver.manage().window().maximize();
@@ -347,21 +390,55 @@ public class Drivers {
         return driver;
     }
 
+    private WebDriver createSafariDriver(String forUserPersona, TestExecutionContext testExecutionContext, JSONObject safariConfigurations) {
+        SafariOptions safariOptions = new SafariOptions();
+        DesiredCapabilities caps = DesiredCapabilities.safari();
+        boolean setUseTechnologyPreview = safariConfigurations.getBoolean("setUseTechnologyPreview");
+        boolean acceptInsecureCerts = safariConfigurations.getBoolean("acceptInsecureCerts");
+        String proxyUrl = Runner.getProxyURL();
+        shouldBrowserBeMaximized = safariConfigurations.getBoolean("maximize");
+        caps.setCapability("acceptInsecureCerts",acceptInsecureCerts);
+        if (null != proxyUrl) {
+            LOGGER.info("Setting Proxy for browser: " + proxyUrl);
+            safariOptions.setProxy(new Proxy().setHttpProxy(proxyUrl));
+        }
+        safariOptions.setUseTechnologyPreview(setUseTechnologyPreview); // setUseTechnologyPreview is false bydefault turn it on only if system supports
+        LOGGER.info("SafariOptions: " + safariOptions.asMap());
+        setLogFileName(forUserPersona, testExecutionContext, "Safari");
+        WebDriver driver = Runner.isRunningInCI() ? createRemoteWebDriver(safariOptions) : new SafariDriver(safariOptions);
+        LOGGER.info("Safari driver created");
+        Capabilities capabilities = Runner.isRunningInCI() ? ((RemoteWebDriver) driver).getCapabilities() : ((SafariDriver) driver).getCapabilities();
+        userPersonaDriverCapabilities.put(forUserPersona, capabilities);
+        LOGGER.info("Safari driver capabilities extracted for further use");
+        // webpush notifications are disabled bydefault in safari , headless is not supported by safari browser and user profiles cannot be set in safari
+        return driver;
+    }
+
     private JSONObject getBrowserConfig() {
         String browserConfigFileContents = Runner.getBrowserConfigFileContents();
         String browserConfigFile = Runner.getBrowserConfigFile();
         return JsonSchemaValidator.validateJsonFileAgainstSchema(browserConfigFile, browserConfigFileContents, BROWSER_CONFIG_SCHEMA_FILE);
     }
 
-    private void checkConnectivityToBaseUrl() {
-        String providedBaseUrl = Runner.getBaseURLForWeb();
-        if (null == providedBaseUrl) {
-            throw new InvalidTestDataException("baseUrl not provided");
-        }
-        baseUrl = String.valueOf(Runner.getFromEnvironmentConfiguration(providedBaseUrl));
+    private void checkConnectivityToBaseUrl(String baseUrl) {
         LOGGER.info(String.format("Check connectivity to baseUrl: '%s'", baseUrl));
         String[] curlCommand = new String[]{"curl -m 60 --insecure -I " + baseUrl};
         CommandLineExecutor.execCommand(curlCommand);
+    }
+
+    private String getBaseUrl(String userPersona) {
+        String providedBaseUrlKey = Runner.getBaseURLForWeb();
+
+        String appName = userPersonaApps.get(userPersona);
+        if (!appName.equalsIgnoreCase(DEFAULT)) {
+            providedBaseUrlKey = appName.toUpperCase() + "_BASE_URL";
+        }
+        System.out.println("Using BaseURL key: " + providedBaseUrlKey);
+
+        if (null == providedBaseUrlKey) {
+            throw new InvalidTestDataException("baseUrl not provided");
+        }
+        return String.valueOf(Runner.getFromEnvironmentConfiguration(providedBaseUrlKey));
     }
 
     @NotNull
@@ -619,6 +696,12 @@ public class Drivers {
             validateVisualTestResults(userPersona);
             attachLogsAndCloseDriver(userPersona);
         });
+        for(AppiumDevice additionalDevice : additionalDevices) {
+            LOGGER.info("Freeing device: " + additionalDevice.getDevice().getName());
+            additionalDevice.freeDevice();
+            additionalDevice.setChromeDriverPort(0);
+        }
+
     }
 
     private void validateVisualTestResults(String userPersona) {
@@ -681,8 +764,14 @@ public class Drivers {
             logMessage = String.format("Closing WindowsDriver for App '%s' for user '%s'", appPackageName, userPersona);
             LOGGER.info(logMessage);
             appiumDriver.closeApp();
-            appiumDriver.quit();
-
+            TestExecutionContext context = SessionContext.getTestExecutionContext(Thread.currentThread().getId());
+            AppiumDriver<WebElement> atdAppiumDriver = (AppiumDriver<WebElement>) context.getTestState(TEST_CONTEXT.APPIUM_DRIVER);
+            if (appiumDriver.equals(atdAppiumDriver)) {
+                LOGGER.info(String.format("ATD will quit the driver for persona: '%s'", userPersona));
+            } else {
+                LOGGER.info(String.format("Quit driver for persona: '%s'", userPersona));
+                appiumDriver.quit();
+            }
             logMessage = String.format("App: '%s' terminated", appPackageName);
             LOGGER.info(logMessage);
             ReportPortal.emitLog(logMessage, DEBUG, new Date());
@@ -720,6 +809,14 @@ public class Drivers {
                     appPackageName,
                     applicationState);
             LOGGER.info(logMessage);
+            TestExecutionContext context = SessionContext.getTestExecutionContext(Thread.currentThread().getId());
+            AppiumDriver<WebElement> atdAppiumDriver = (AppiumDriver<WebElement>) context.getTestState(TEST_CONTEXT.APPIUM_DRIVER);
+            if (appiumDriver.equals(atdAppiumDriver)) {
+                LOGGER.info(String.format("ATD will quit the driver for persona: '%s'", userPersona));
+            } else {
+                LOGGER.info(String.format("Quit driver for persona: '%s'", userPersona));
+                appiumDriver.quit();
+            }
             ReportPortal.emitLog(logMessage, DEBUG, new Date());
         }
     }
